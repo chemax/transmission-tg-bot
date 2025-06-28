@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	conf, err := cfg.Load("config.json")
+	conf, err := cfg.Load(os.Args[1])
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}

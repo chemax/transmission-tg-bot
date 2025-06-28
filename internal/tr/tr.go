@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"time"
 
 	"github.com/hekmon/transmissionrpc/v2"
 )
@@ -12,12 +13,24 @@ type Client struct {
 	rpc *transmissionrpc.Client
 }
 
-func New(url, user, pass string) (*Client, error) {
-	rpc, err := transmissionrpc.New(url, user, pass, nil)
+func New(rawURL, user, pass string) (*Client, error) {
+	ep, err := parseTRURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{rpc: rpc}, nil
+
+	cfg := &transmissionrpc.AdvancedConfig{
+		HTTPS:       ep.https,
+		Port:        ep.port, // 0 ⇒ библиотека подставит 9091
+		RPCURI:      ep.rpcURI,
+		HTTPTimeout: 10 * time.Second,
+	}
+
+	r, err := transmissionrpc.New(ep.host, user, pass, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{rpc: r}, nil
 }
 
 func (c *Client) AddMagnet(ctx context.Context, magnet, dir string) (int64, error) {

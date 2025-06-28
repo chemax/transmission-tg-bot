@@ -18,6 +18,11 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+const (
+	maxMsgLen = 4096 // sendMessage / editMessageText
+	maxCBLen  = 200  // answerCallbackQuery
+)
+
 type Bot struct {
 	tb        *tb.Bot
 	conf      *cfg.Config
@@ -35,6 +40,7 @@ type cbPayload struct {
 	IsMagnet bool
 	Payload  string
 	Dir      string
+	Cat      string // ← НОВОЕ: имя категории
 }
 
 type torrentMeta struct {
@@ -171,12 +177,13 @@ func (b *Bot) offerCategories(c tb.Context, payload string, isMagnet bool) error
 			IsMagnet: isMagnet,
 			Payload:  payload,
 			Dir:      dir,
+			Cat:      cat, // ← сохраняем
 		}
 		b.cbMx.Unlock()
 
 		btn := tb.InlineButton{
-			Text: cat,   // ← Unique убрали
-			Data: token, // в data лежит только token (8–12 байт)
+			Text: cat,
+			Data: token,
 		}
 		rows = append(rows, []tb.InlineButton{btn})
 	}
@@ -197,54 +204,102 @@ func mustLog(err error, msg string) {
 		log.Printf("[ERR] %s: %v", msg, err)
 	}
 }
-func (b *Bot) onCallback(c tb.Context) error {
-	token := c.Callback().Data // теперь это именно наш token
 
+// onCallback обрабатывает нажатия на инлайн-кнопки выбора категории.
+func (b *Bot) onCallback(c tb.Context) error {
+	// 1. Получаем токен (короткая строка ≤64 байт, без префиксов)
+	token := c.Callback().Data
+
+	// 2. Достаём сохранённые данные
 	b.cbMx.Lock()
 	p, ok := b.cbMap[token]
 	if ok {
-		delete(b.cbMap, token) // одноразовый
+		delete(b.cbMap, token) // одноразовый токен
 	}
 	b.cbMx.Unlock()
 
-	if !ok { // не нашли → кнопка «протухла» (обычно после рестарта)
-		return c.Respond(&tb.CallbackResponse{Text: "Срок действия кнопки истёк"})
+	if !ok {
+		b.safeRespond(c, "Срок действия кнопки истёк")
+		return nil
 	}
 
+	// 3. Добавляем торрент в Transmission
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
-	var tid int64
-	var err error
+	var (
+		tid int64
+		err error
+	)
+
 	if p.IsMagnet {
 		tid, err = b.tr.AddMagnet(ctx, p.Payload, p.Dir)
 	} else {
-		// p.Payload == FileID
+		// p.Payload содержит FileID .torrent-файла
 		fileInfo, errDL := b.tb.FileByID(p.Payload)
 		if errDL != nil {
-			return c.Respond(&tb.CallbackResponse{Text: "Не смог получить файл"})
+			b.safeRespond(c, "Не смог получить файл")
+			return nil
 		}
 		reader, errDL := b.tb.File(&fileInfo)
 		if errDL != nil {
-			return c.Respond(&tb.CallbackResponse{Text: "Ошибка загрузки файла"})
+			b.safeRespond(c, "Ошибка загрузки файла")
+			return nil
 		}
 		defer reader.Close()
 
 		buf := new(bytes.Buffer)
 		if _, errDL = buf.ReadFrom(reader); errDL != nil {
-			return c.Respond(&tb.CallbackResponse{Text: "Ошибка чтения файла"})
+			b.safeRespond(c, "Ошибка чтения файла")
+			return nil
 		}
 		tid, err = b.tr.AddTorrentFile(ctx, buf.Bytes(), p.Dir)
 	}
+
 	if err != nil {
-		mustLog(err, ".")
-		return c.Respond(&tb.CallbackResponse{Text: "Transmission: " + err.Error()})
+		b.safeRespond(c, "Transmission: "+err.Error())
+		return nil
 	}
 
+	// 4. Сохраняем в activeMap для мониторинга
 	b.trackTorrent(tid, c.Chat().ID, c.Message().ID)
-	if err := c.Respond(&tb.CallbackResponse{Text: "✅ Добавлено"}); err != nil {
-		mustLog(err, "respond OK not OK")
-		return err
+
+	// 5. Обновляем текст сообщения и убираем клавиатуру
+	newText := fmt.Sprintf("📥 Загрузка в категорию *%s* принята.", p.Cat)
+
+	if _, err := b.tb.Edit(
+		c.Message(),
+		newText,
+		&tb.SendOptions{ParseMode: tb.ModeMarkdown},
+	); err != nil {
+		log.Printf("[ERR] edit msg: %v", err)
 	}
+
+	if _, err := b.tb.EditReplyMarkup(c.Message(), nil); err != nil {
+		log.Printf("[ERR] clear markup: %v", err)
+	}
+
+	// 6. Сообщаем в popup
+	b.safeRespond(c, "✅ Добавлено")
 	return nil
+}
+
+// safeRespond – отправляет popup-ответ на callback, обрезая слишком длинный текст
+func (b *Bot) safeRespond(c tb.Context, text string) {
+	if len(text) > maxCBLen {
+		text = text[:maxCBLen-1] + "…"
+	}
+	if err := c.Respond(&tb.CallbackResponse{Text: text}); err != nil {
+		log.Printf("[ERR] respond: %v", err)
+	}
+}
+
+// (необязательно) safeSend – короткое chat-сообщение с тем же ограничением
+func (b *Bot) safeSend(to tb.Recipient, text string, opts ...interface{}) {
+	if len(text) > maxMsgLen {
+		text = text[:maxMsgLen-1] + "…"
+	}
+	if _, err := b.tb.Send(to, text, opts...); err != nil {
+		log.Printf("[ERR] send: %v", err)
+	}
 }
