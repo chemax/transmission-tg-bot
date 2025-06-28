@@ -1,0 +1,16 @@
+{
+  "bot_token": "6281234567:ABCDE…",
+  "transmission_rpc": {
+    "url": "http://127.0.0.1:9091/transmission/rpc",
+    "user": "transmission",
+    "password": "secret"
+  },
+  "poll_interval_sec": 30,
+  "chat_whitelist": [-1001234567890],
+  "categories": {
+    "Movies":   "/srv/media/Movies",
+    "TV":       "/srv/media/TV",
+    "Games":    "/srv/media/Games",
+    "Books":    "/srv/media/Books"
+  }
+}
