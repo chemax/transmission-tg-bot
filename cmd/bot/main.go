@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	youtube_dl "transmission-tg-control/internal/youtube-dl"
 
 	"transmission-tg-control/internal/cfg"
 	"transmission-tg-control/internal/tg"
@@ -21,8 +22,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("transmission: %v", err)
 	}
+	ytClient := youtube_dl.New(conf.Youtube)
 
-	bot, err := tg.New(conf, trClient)
+	bot, err := tg.New(conf, trClient, ytClient)
 	if err != nil {
 		log.Fatalf("telegram: %v", err)
 	}

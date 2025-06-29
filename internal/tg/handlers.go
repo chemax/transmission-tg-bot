@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	youtube_dl "transmission-tg-control/internal/youtube-dl"
 
 	"transmission-tg-control/internal/cfg"
 	"transmission-tg-control/internal/tr"
@@ -34,6 +35,7 @@ type Bot struct {
 	seed      uint64               // атомарный счётчик токенов
 	ctx       context.Context
 	cancel    context.CancelFunc
+	yt        *youtube_dl.YoutubeDL
 }
 
 type cbPayload struct {
@@ -48,7 +50,7 @@ type torrentMeta struct {
 	msgID  int
 }
 
-func New(conf *cfg.Config, trc *tr.Client) (*Bot, error) {
+func New(conf *cfg.Config, trc *tr.Client, ytClient *youtube_dl.YoutubeDL) (*Bot, error) {
 	tele, err := tb.NewBot(tb.Settings{
 		Token:  conf.BotToken,
 		Poller: &tb.LongPoller{Timeout: 10 * time.Second},
@@ -58,11 +60,12 @@ func New(conf *cfg.Config, trc *tr.Client) (*Bot, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-
+	ytClient.InsertCtx(ctx)
 	b := &Bot{
 		tb:        tele,
 		conf:      conf,
 		tr:        trc,
+		yt:        ytClient,
 		activeMap: make(map[int64]*torrentMeta),
 		cbMap:     make(map[string]cbPayload), // NEW
 		ctx:       ctx,
@@ -107,8 +110,12 @@ func (b *Bot) onText(c tb.Context) error {
 		return nil
 	}
 	text := c.Text()
+	log.Println(text)
 	if strings.Contains(text, "magnet:?") {
 		return b.offerCategories(c, text, true)
+	}
+	if strings.Contains(text, "youtube.com") || strings.Contains(text, "youtu.be") {
+		return b.youtubeDL(c, text)
 	}
 	return nil
 }
@@ -198,11 +205,6 @@ func (b *Bot) offerCategories(c tb.Context, payload string, isMagnet bool) error
 func (b *Bot) nextToken() string {
 	n := atomic.AddUint64(&b.seed, 1)
 	return fmt.Sprintf("%x", n) // 8-12 символов
-}
-func mustLog(err error, msg string) {
-	if err != nil {
-		log.Printf("[ERR] %s: %v", msg, err)
-	}
 }
 
 // onCallback обрабатывает нажатия на инлайн-кнопки выбора категории.
@@ -294,12 +296,28 @@ func (b *Bot) safeRespond(c tb.Context, text string) {
 	}
 }
 
-// (необязательно) safeSend – короткое chat-сообщение с тем же ограничением
-func (b *Bot) safeSend(to tb.Recipient, text string, opts ...interface{}) {
+// safeReply – короткое chat-сообщение с тем же ограничением
+func (b *Bot) safeReply(to *tb.Message, text string, opts ...interface{}) {
 	if len(text) > maxMsgLen {
 		text = text[:maxMsgLen-1] + "…"
 	}
-	if _, err := b.tb.Send(to, text, opts...); err != nil {
+	if _, err := b.tb.Reply(to, text, opts...); err != nil {
 		log.Printf("[ERR] send: %v", err)
 	}
+}
+
+func (b *Bot) youtubeDL(c tb.Context, text string) error {
+	if !b.conf.Youtube.Enabled {
+		return nil
+	}
+	b.yt.Download(text, func(err error) {
+		if err != nil {
+			log.Printf("[ERR] youtube dl: %v", err)
+			b.safeReply(c.Message(), err.Error())
+			return
+		}
+
+		b.safeReply(c.Message(), "✅загрузка завершена!")
+	})
+	return nil
 }

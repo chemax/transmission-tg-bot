@@ -12,5 +12,11 @@
     "TV":       "/srv/media/TV",
     "Games":    "/srv/media/Games",
     "Books":    "/srv/media/Books"
+  },
+  "youtube": {
+    "youtube_enabled": true,
+    "proxy": "http://user:password@proxy.example.com:8080",
+    "download_path": "/tmp/youtube",
+    "yt_dlp_location": "/bin/yt-dlp"
   }
 }
