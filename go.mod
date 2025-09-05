@@ -6,7 +6,7 @@ toolchain go1.23.1
 
 require (
 	github.com/hekmon/transmissionrpc/v2 v2.0.1
-	github.com/lrstanley/go-ytdlp v0.0.0-20250626003057-250a0ba9f4c5
+	github.com/lrstanley/go-ytdlp v1.2.3
 	github.com/spf13/viper v1.20.1
 	gopkg.in/telebot.v3 v3.3.8
 )
@@ -25,6 +25,7 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
+	github.com/ulikunitz/xz v0.5.12 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/crypto v0.39.0 // indirect
